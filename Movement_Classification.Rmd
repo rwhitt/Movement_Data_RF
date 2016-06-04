@@ -1,0 +1,106 @@
+---
+title: "Movement Class Prediction"
+author: "Ryan Whitt"
+date: "June 4, 2016"
+output: html_document
+keep_md: true 
+---
+
+###Movement Classification Prediction
+#### Using movement data collected from personal activity devices, the goal of this analysis is to precict which of 5 classifications an exercise falls into based on the associated sensor readings. The data for this is available at http://groupware.les.inf.puc-rio.br/har
+
+1. Load Libraries
+
+```{r, warning=FALSE, message=FALSE}
+library(reshape2)
+library(ggplot2)
+library(dplyr)
+library(car)
+library(caret)
+library(doParallel)
+library(randomForest)
+library(corrplot)
+```
+
+2. Read in full training and validation data sets
+
+```{r}
+train <- read.csv("pml-training.csv", header=T, na.strings=c("","NA"))
+validation <- read.csv("pml-testing.csv", header=T, na.strings=c("","NA"))
+```
+
+3. Evaluate dataset for missing data using missingness map created with ggplot
+
+```{r, cache=TRUE}
+ggplot_missing <- function(x){
+  
+  x %>% 
+    is.na %>%
+    melt %>%
+    ggplot(data = .,
+           aes(x = Var2,
+               y = Var1)) +
+    geom_raster(aes(fill = value)) +
+    scale_fill_grey(name = "",
+                    labels = c("Present","Missing")) +
+    theme_minimal() +
+    theme(axis.text.x  = element_blank()) +
+    #theme(axis.text.x  = element_text(angle=45, vjust=0.5)) + 
+    labs(x = "Variables in Dataset",
+         y = "Rows / observations")
+}
+
+ggplot_missing(train)
+
+```
+
+4. We see a large amount of missing data. Upon examining the dataset, we also see several variables not important to classification prediction like userids and timestamps. We wiil remove obviously unimportant variables and any variables with >50% NA values. 
+
+```{r}
+#remove all features with > 50% NA observations
+train1 <- train[ , colSums(is.na(train)) < nrow(train)*.5]
+valid1 <- validation[ , colSums(is.na(validation)) < nrow(validation)*.5]
+
+#remove time and indiviudal classifiers for generalizability
+train1 <- train1[,-c(1:7)]
+valid1 <- valid1[,-c(1:7)]
+```
+
+5. Next it's a good idea to examine data for multi-collinearity, we can do this using a correlation matrix plot from the corrplot package.
+
+```{r, fig.height=6, fig.width=6}
+corrplot(cor(train1[,-ncol(train1)]), order = "hclust", tl.cex=0.5)
+```
+
+6. Since we see a resonable number of colinear variables, we should select a model robsut to this. In this instance, we will use Random Forest. Next we can create training and testing sub-sets from the original training data for cross-validation.
+
+```{r}
+set.seed(5630)
+part <- createDataPartition(y=train1$classe,p=0.5,list=FALSE)
+training <- train1[part,]
+testing <- train1[-part,]
+```
+
+7. Next we will create the Random Forest Model and utilize multiple CPU cores to speed up processing
+
+```{r, cache=TRUE}
+cluster <- makeCluster(detectCores() - 4)
+registerDoParallel(cluster)
+fit <- train(classe~.,data=training,method="rf", prox=TRUE, importance = TRUE, ntree = 300, allowParallel = TRUE)
+stopCluster(cluster)
+```
+
+8. In viewing the results and most important variables, we a very high classification accuracy rate of >98%. We will confirm these results by validating out model against out of sample test data.
+
+```{r}
+fit
+
+varImp(fit)
+```
+
+9. Upon Cross-Validating the results against the test set, we see equally good performance with ~98.8% accuracy. We would estimate a roughly 1.2% miss-classification rate.
+
+```{r}
+confusionMatrix(testing$classe, predict(fit, testing))
+```
+
