@@ -1,0 +1,12 @@
+base
+reshape2
+ggplot2
+dplyr
+car
+lattice
+caret
+foreach
+iterators
+doParallel
+randomForest
+corrplot
